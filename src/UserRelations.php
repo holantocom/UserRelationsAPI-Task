@@ -4,9 +4,9 @@ class UserRelations implements IUserRelations
 {
     private $DB;
     private $user;
-    private $friendGraph = array();
-    private $foeGraph = array();
     private $visitedFriends = array();
+    private $arrayGraphDepth = ['friend' => 0, 'foe' => 0];
+    private $relationGraph = array();
 
     public function __construct(PDO $mysql, IUser $user)
     {
@@ -27,11 +27,14 @@ class UserRelations implements IUserRelations
 
     public function removeRelation(IUser $user): bool
     {
+        $userID = $this->user->getId();
+        $relationID = $user->getId();
+
         $SQL = "UPDATE user_relations SET isDeleted = 1 WHERE user_id = ? AND relation_id = ? AND isDeleted = 0;";
-        $request = $this->DB->loadData($SQL, [$this->user->getId(), $user->getId()]);
+        $request = $this->DB->loadData($SQL, [$userID, $relationID]);
         if($request['affected_rows']) {
-            $this->friendGraph[$this->user->getId()] = array_diff($this->friendGraph[$this->user->getId()], (array)$user->getId());
-            $this->foeGraph[$this->user->getId()] = array_diff($this->foeGraph[$this->user->getId()], (array)$user->getId());
+            $this->relationGraph['friend'][$userID] = array_diff( $this->relationGraph['friend'][$userID], (array)$relationID);;
+            $this->relationGraph['foe'][$userID] = array_diff($this->relationGraph['foe'][$userID], (array)$relationID);
             return TRUE;
         } else {
             return FALSE;
@@ -105,11 +108,7 @@ class UserRelations implements IUserRelations
         $SQL = "INSERT INTO user_relations (user_id, relation_id, relation_type) VALUE (?, ?, ?);";
         $request = $this->DB->loadData($SQL, [$user->getId(), $relation->getId(), $relationType]);
 
-        if($relationType == 'friend'){
-            $this->friendGraph[$user->getId()][] = $relation->getId();
-        } else {
-            $this->foeGraph[$user->getId()][] = $relation->getId();
-        }
+        $this->relationGraph[$relationType][$user->getId()][] = $relation->getId();
 
         return $request['affected_rows'] ? TRUE : FALSE;
     }
@@ -120,48 +119,106 @@ class UserRelations implements IUserRelations
             return FALSE;
         }
 
-        if(!count($this->friendGraph) && !count($this->foeGraph)){
-
-            $SQL = "SELECT relation_id, user_id, relation_type FROM user_relations WHERE isDeleted = 0;";
-            $request = $this->DB->loadData($SQL);
-
-            foreach ($request['data'] as $row){
-
-                if($row['relation_type'] == "friend"){
-                    $this->friendGraph[$row['user_id']][] = $row['relation_id'];
-                } else {
-                    $this->foeGraph[$row['user_id']][] = $row['relation_id'];
-                }
-            }
-
-        }
-
         $this->visitedFriends = array();
-        $graph = $relationType == 'friend' ? $this->friendGraph : $this->foeGraph;
         $maxScanDepth = $maxScanDepth ? $maxScanDepth : PHP_INT_MAX;
-        $answer = $this->depthSearch($graph, [], $maxScanDepth, $this->user->getId(), $relation->getId());
+        $answer = $this->widthSearch($maxScanDepth, $this->user->getId(), $relation->getId(), $relationType);
 
         return $answer;
     }
 
-    private function depthSearch($graph, $visited, $depth, $startNode, $endNode)
+    private function widthSearch($maxDepth, $startNode, $endNode, $relationType): bool
     {
-        if($depth < 0)
-            return FALSE;
+        $searchQueue = [];
+        $loadList = [];
+        $searched[$startNode] = $startNode;
+        $iteration = 1;
 
-        if($startNode == $endNode)
+        if($startNode == $endNode){
             return TRUE;
+        }
 
-        if(in_array($startNode, $visited))
-            return FALSE;
+        //First init direct friends
+        if(!$this->arrayGraphDepth[$relationType]){
 
-        $visited[] = $startNode;
-        $this->visitedFriends[] = $startNode;
+            $this->relationGraph['friend'][$startNode] = [];
+            $this->relationGraph['foe'][$startNode] = [];
+            
+            $SQL = "SELECT user_id, relation_type, relation_id FROM user_relations WHERE user_id = ? AND isDeleted = 0;";
+            $request = $this->DB->loadData($SQL, (array)$this->user->getId());
 
-        foreach( ($graph[$startNode] ?? []) as $index => $vertex){
-            if(!in_array($vertex, $visited)){
-                if($this->depthSearch($graph, $visited, ($depth - 1), $vertex, $endNode))
+            foreach ($request['data'] as $row){
+                $this->relationGraph[$row['relation_type']][$row['user_id']][] = $row['relation_id'];
+            }
+
+            $this->arrayGraphDepth['friend']++;
+            $this->arrayGraphDepth['foe']++;
+        }
+
+        foreach($this->relationGraph[$relationType][$startNode] as $value) {
+            $searchQueue[] = $value;
+        }
+
+        while($searchQueue || $loadList) {
+
+            //If we cant find connection in this level, load new layer of users
+            //This users store in memory and cant load twice
+            //For example, we have 2 layers in memory and we try to search in 3 layer, we load only one more layer
+            
+            if(!$searchQueue){
+
+                $iteration++;
+                if($iteration > $maxDepth){
+                    return FALSE;
+                }
+
+                if($this->arrayGraphDepth[$relationType] < $iteration){
+
+                    //Init
+                    foreach ($loadList as $element){
+                        $this->relationGraph[$relationType][$element] = [];
+                    }
+
+                    $SQL = "SELECT user_id, relation_id FROM user_relations WHERE user_id IN (".implode(',', $loadList).") AND relation_type = ? AND isDeleted = 0;";
+                    $request = $this->DB->loadData($SQL, (array)$relationType);
+
+                    //Load friends and foe
+                    foreach ($request['data'] as $row){
+                        $this->relationGraph[$relationType][$row['user_id']][] = $row['relation_id'];
+                    }
+
+                    $this->arrayGraphDepth[$relationType]++;
+
+                }
+
+
+                foreach($loadList as $element) {
+                    foreach($this->relationGraph[$relationType][$element] as $value) {
+
+                        if(!isset($searched[$value])){
+                            $searchQueue[] = $value;
+                        }
+
+                    }
+                }
+
+                if(!$searchQueue){
+                    return FALSE;
+                }
+
+                $loadList = [];
+            }
+
+            $node = array_shift($searchQueue);
+
+            if(!isset($searched[$node])){
+
+                if($node == $endNode){
                     return TRUE;
+                }
+
+                $this->visitedFriends[$node] = $node;
+                $searched[$node] = $node;
+                $loadList[$node] = $node;
             }
         }
 
