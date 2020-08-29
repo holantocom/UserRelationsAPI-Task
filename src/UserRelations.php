@@ -33,8 +33,8 @@ class UserRelations implements IUserRelations
         $SQL = "UPDATE user_relations SET isDeleted = 1 WHERE user_id = ? AND relation_id = ? AND isDeleted = 0;";
         $request = $this->DB->loadData($SQL, [$userID, $relationID]);
         if($request['affected_rows']) {
-            $this->relationGraph['friend'][$userID] = array_diff( $this->relationGraph['friend'][$userID], (array)$relationID);;
-            $this->relationGraph['foe'][$userID] = array_diff($this->relationGraph['foe'][$userID], (array)$relationID);
+            $this->relationGraph['friend'][$userID] = array_diff($this->relationGraph['friend'][$userID] ?? [], (array)$relationID);
+            $this->relationGraph['foe'][$userID] = array_diff($this->relationGraph['foe'][$userID] ?? [], (array)$relationID);
             return TRUE;
         } else {
             return FALSE;
