@@ -75,9 +75,8 @@ class UserRelations implements IUserRelations
 
         foreach($friends as $user){
 
-            $isFriend = $this->hasConnection($user, $maxScanDepth, 'friend');
             $isFoe = $this->hasConnection($user, $maxScanDepth, 'foe');
-            if($isFriend && $isFoe){
+            if($isFoe){
                 $answer[] = $user;
             }
 
