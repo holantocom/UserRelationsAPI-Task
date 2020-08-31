@@ -1,14 +1,5 @@
 <?php
 
-interface IUser {
-    /**
-     * Constructor.
-     * @param int $id user unique id
-     */
-    public function __construct(int $id);
-    public function getId(): int;
-}
-
 /**
  * User Relations Class Contract.
  * Implementation must write, read and delete relations in MySQL.
@@ -16,7 +7,8 @@ interface IUser {
  * Direct relation - is a close friend or foe.
  * Indirect relation - is a far friend or foe, thru some number of relations.
  */
-interface IUserRelations {
+interface IUserRelations
+{
     /**
      * How many direct relations can be added for one user
      */
