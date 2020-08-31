@@ -118,7 +118,7 @@ class UserRelations implements IUserRelations
 
         $this->relationGraph[$relationType][$user->getId()][] = $relation->getId();
 
-        return $request['affected_rows'];
+        return (bool)$request['affected_rows'];
     }
 
     private function hasConnection(IUser $relation, int $maxScanDepth, string $relationType): bool
